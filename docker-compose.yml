@@ -1,0 +1,33 @@
+version: "3.9"
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - MODE=${MODE:-MOCK}
+      - NIM_LLM_URL=${NIM_LLM_URL}
+      - NIM_LLM_API_KEY=${NIM_LLM_API_KEY}
+      - RIVA_ASR_URL=${RIVA_ASR_URL}
+      - RIVA_TTS_URL=${RIVA_TTS_URL}
+      - A2F_URL=${A2F_URL}
+    command: uvicorn app:app --host 0.0.0.0 --port 8000
+
+  # Uncomment and configure when you have NVIDIA services available.
+  # nim-llm:
+  #   image: nvcr.io/nim/meta/llama-3_1-nemotron-70b-instruct:latest
+  #   runtime: nvidia
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - capabilities: [gpu]
+
+  # riva-asr:
+  #   image: nvcr.io/nvidia/riva/riva-asr:latest
+
+  # riva-tts:
+  #   image: nvcr.io/nvidia/riva/riva-tts:latest
+
+  # audio2face:
+  #   image: nvcr.io/nvidia/ace/audio2face-3d:latest

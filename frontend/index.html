@@ -1,0 +1,171 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Digital Human — ACE-inspired Demo</title>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 0; background: #0b1020; color: #e8ebff; }
+    header { padding: 18px 24px; border-bottom: 1px solid #223; display:flex; align-items:center; gap:12px;}
+    .badge { background:#1b2040; padding:4px 10px; border-radius:999px; font-size:12px; border:1px solid #334; }
+    main { display:grid; grid-template-columns: 1.2fr 1fr; gap: 24px; padding:24px; }
+    #avatarCard, #chatCard { background:#121933; border:1px solid #233; border-radius:16px; padding:16px; }
+    #canvas { width:100%; height:auto; background: radial-gradient(1200px 600px at 50% -200px, #16204a, #0b1020); display:block; border-radius:12px; }
+    .row { display:flex; gap:12px; margin-top:12px; }
+    button, input[type="text"] { background:#1a2142; color:#e8ebff; border:1px solid #2a356b; border-radius:10px; padding:10px 12px; }
+    button:hover { background:#202961; cursor:pointer; }
+    .log { height: 280px; overflow:auto; background:#0d1430; border:1px solid #233; border-radius:12px; padding:12px; }
+    .small { opacity:0.8; font-size:12px; }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>Digital Human — ACE-inspired</strong>
+    <span class="badge">MOCK & REAL modes</span>
+    <span class="small">FastAPI + simple 2D mouth rig</span>
+  </header>
+  <main>
+    <section id="avatarCard">
+      <canvas id="canvas" width="640" height="480"></canvas>
+      <div class="row">
+        <button id="micBtn">🎙️ Speak</button>
+        <button id="stopBtn">⏹ Stop</button>
+        <button id="demoBtn">▶️ Demo Reply</button>
+      </div>
+      <p class="small">Mouth animates from visemes returned by backend (mock or Audio2Face).</p>
+    </section>
+    <section id="chatCard">
+      <div class="row">
+        <input type="text" id="msg" placeholder="Type a message..." style="flex:1"/>
+        <button id="sendBtn">Send</button>
+      </div>
+      <div class="log" id="log"></div>
+      <p class="small">Tip: in REAL mode, wire Riva ASR/TTS and Nemotron NIM in backend/services.</p>
+    </section>
+  </main>
+<script>
+const api = location.hostname.includes("localhost") || location.hostname === "" ? "http://localhost:8000" : window.origin;
+
+const logEl = document.getElementById('log');
+function log(msg){ logEl.innerHTML += `<div>${msg}</div>`; logEl.scrollTop = logEl.scrollHeight; }
+
+// Simple 2D "digital human" mouth rig
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+function drawFace(mouthOpen=0.2){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  const cx = canvas.width/2;
+  const cy = canvas.height/2 - 20;
+  // head
+  ctx.fillStyle = '#e0e6ff';
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, 120, 150, 0, 0, Math.PI*2);
+  ctx.fill();
+  // eyes
+  ctx.fillStyle = '#0b1020';
+  ctx.beginPath(); ctx.arc(cx-40, cy-20, 10, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx+40, cy-20, 10, 0, Math.PI*2); ctx.fill();
+  // mouth
+  const w = 90;
+  const h = 10 + mouthOpen*60;
+  ctx.fillStyle = '#1f2449';
+  ctx.beginPath();
+  ctx.moveTo(cx-w/2, cy+60);
+  ctx.quadraticCurveTo(cx, cy+60+h, cx+w/2, cy+60);
+  ctx.quadraticCurveTo(cx, cy+60-h*0.6, cx-w/2, cy+60);
+  ctx.fill();
+}
+drawFace(0.2);
+
+let visemes = [];
+let playing = false;
+let audioCtx, srcNode;
+
+function playVisemes(seq){
+  let i = 0;
+  playing = true;
+  function step(){
+    if(!playing || i >= seq.length) return;
+    const v = seq[i].v || 0;
+    drawFace(v);
+    i++;
+    setTimeout(step, 50);
+  }
+  step();
+}
+
+async function ttsAndAnimate(text){
+  try{
+    log(`<em>You:</em> ${text}`);
+    const res = await fetch(api + "/api/tts", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({text})
+    });
+    const j = await res.json();
+    // visemes
+    playVisemes(j.visemes || []);
+    // audio
+    if(j.audio_wav_b64){
+      const b = atob(j.audio_wav_b64);
+      const arr = new Uint8Array(b.length); for(let i=0;i<b.length;i++) arr[i]=b.charCodeAt(i);
+      const blob = new Blob([arr], {type: "audio/wav"});
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.play();
+    }
+  }catch(e){
+    log(`<span style="color:#ff8a8a">TTS error: ${e}</span>`);
+  }
+}
+
+document.getElementById('sendBtn').onclick = async () => {
+  const text = document.getElementById('msg').value.trim();
+  if(!text) return;
+  const res = await fetch(api + "/api/chat", {
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({text})
+  });
+  const j = await res.json();
+  log(`<strong>Agent:</strong> ${j.reply}`);
+  ttsAndAnimate(j.reply);
+};
+
+document.getElementById('demoBtn').onclick = () => {
+  const sample = "Our returns are free within 30 days. Want a QR code to drop off your parcel?";
+  log(`<strong>Agent:</strong> ${sample}`);
+  ttsAndAnimate(sample);
+};
+
+// Mic capture placeholder (MOCK): generates a canned transcript
+let mediaStream;
+document.getElementById('micBtn').onclick = async () => {
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({audio:true});
+    log("🎙️ Listening... (mock) — click Stop to transcribe");
+  } catch (e){
+    log(`<span style="color:#ff8a8a">Mic error: ${e}</span>`);
+  }
+};
+
+document.getElementById('stopBtn').onclick = async () => {
+  if(mediaStream){
+    mediaStream.getTracks().forEach(t=>t.stop());
+    log("⏹ Stopped. Sending to ASR (mock)...");
+    // In REAL mode you'd send recorded audio to /api/stt
+    const mockText = "What are today’s offers?";
+    log(`<em>You:</em> ${mockText}`);
+    const res = await fetch(api + "/api/chat", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({text: mockText})
+    });
+    const j = await res.json();
+    log(`<strong>Agent:</strong> ${j.reply}`);
+    ttsAndAnimate(j.reply);
+  }
+};
+</script>
+</body>
+</html>
